@@ -237,7 +237,13 @@ elif menu == "Import / Export":
 
     uploaded = st.file_uploader("Upload Master Excel", type="xlsx")
     if uploaded:
-        df = pd.read_excel(uploaded)
+        try:
+            df = pd.read_excel(uploaded, engine="openpyxl")
+        except ImportError:
+            st.error(
+                "Excel support is missing. Please install the required dependency: openpyxl"
+            )
+            st.stop()
         df.columns = df.columns.str.strip()
         conn = get_conn()
         existing = set(
