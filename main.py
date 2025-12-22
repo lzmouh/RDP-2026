@@ -200,7 +200,7 @@ elif menu == "Admin":
         load_from_excel()
         st.success("Database updated from Excel")
 
-st.caption("SQLite-backed RDP system – auditable, persistent, Excel-compatible
+st.caption("SQLite-backed RDP system – auditable, persistent, Excel-compatible")
 
 # ================================================================
 # EXTENDED IMPLEMENTATION – ALL 7 ITEMS COMPLETED
