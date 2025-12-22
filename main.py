@@ -1,8 +1,3 @@
-This rewritten version cleans up the logic, fixes the `openpyxl` export buffer issue, ensures the `kpis` table exists to prevent crashes, and adds the missing `CATEGORY_LIMITS` variable.
-
-I have also streamlined the database connections to be more "Pythonic" using context managers (`with` statements).
-
-```python
 import streamlit as st
 import pandas as pd
 import sqlite3
