@@ -185,6 +185,76 @@ elif menu == "Add Candidate":
 # ----------------------------
 # ADMIN
 # ----------------------------
+elif menu == "Import / Export":
+    st.subheader("Import Candidates from Excel")
+
+    uploaded = st.file_uploader(
+        "Upload Master Excel file",
+        type=["xlsx"],
+        help="Upload RDP Candidates Master Excel"
+    )
+
+    if uploaded:
+        df = pd.read_excel(uploaded)
+        df.columns = df.columns.str.strip()
+
+        conn = get_conn()
+        existing = pd.read_sql("SELECT candidate_id FROM candidates", conn)
+        existing_ids = set(existing["candidate_id"].astype(str))
+
+        inserted = 0
+        for _, r in df.iterrows():
+            cid = str(r.get("ID#"))
+            if cid not in existing_ids:
+                conn.execute(
+                    """
+                    INSERT INTO candidates (
+                        candidate_id, name, division, specialty, mentor,
+                        phase_2022, phase_2023, phase_2024, phase_2025,
+                        promotion, degree, nationality, remarks
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        cid,
+                        r.get("Name"),
+                        r.get("Division"),
+                        r.get("Specialty"),
+                        r.get("Mentor"),
+                        r.get("Phase in RDP 2022"),
+                        r.get("Phase in RDP 2023"),
+                        r.get("Phase in RDP 2024"),
+                        r.get("Phase in RDP 2025"),
+                        r.get("Promotion"),
+                        r.get("MS/PhD"),
+                        r.get("Nationality"),
+                        r.get("Remarks"),
+                    )
+                )
+                inserted += 1
+
+        conn.commit()
+        conn.close()
+        st.success(f"Imported {inserted} new candidates into database")
+
+    st.divider()
+    st.subheader("Export Database to Excel")
+
+    if st.button("Export Candidates"):
+        conn = get_conn()
+        export_df = pd.read_sql("SELECT * FROM candidates", conn)
+        conn.close()
+
+        export_file = "RDP_Candidates_Export.xlsx"
+        export_df.to_excel(export_file, index=False)
+
+        with open(export_file, "rb") as f:
+            st.download_button(
+                label="Download Excel",
+                data=f,
+                file_name=export_file,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
 elif menu == "Admin":
     st.subheader("Admin Controls")
 
@@ -200,7 +270,7 @@ elif menu == "Admin":
         load_from_excel()
         st.success("Database updated from Excel")
 
-st.caption("SQLite-backed RDP system – auditable, persistent, Excel-compatible")
+st.caption("SQLite-backed RDP system – auditable, persistent, Excel-compatible
 
 # ================================================================
 # EXTENDED IMPLEMENTATION – ALL 7 ITEMS COMPLETED
