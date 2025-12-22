@@ -22,8 +22,8 @@ st.set_page_config(page_title="EXPEC ARC RDP – DB", layout="wide")
 # CONFIG
 # -------------------------------------------------------------------
 DB_PATH = "rdp.db"
-MASTER_FILE = "RDP Candidates - Master 2025 - Copy.xlsx"
-MASTER_SHEET = " Master All 2025"
+MASTER_FILE = "RDP_Master.xlsx"
+MASTER_SHEET = "2025"
 
 # -------------------------------------------------------------------
 # DATABASE UTILITIES
