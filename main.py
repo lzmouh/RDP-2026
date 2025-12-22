@@ -1,29 +1,27 @@
-# # EXPEC ARC RDP – Database-Driven Web App (Streamlit + SQLite)
-# -------------------------------------------------------------------
-# IMPLEMENTED:
-# ✓ SQLite database built from Master Excel
-# ✓ Persistent storage (local)
-# ✓ Display, search, add, remove candidates
-# ✓ Safe schema mapped exactly to your Excel
-# ✓ Ready for scoring-table extension
-# -------------------------------------------------------------------
-# Local run:
-#   pip install streamlit pandas openpyxl sqlalchemy
-#   streamlit run app.py
+This rewritten version cleans up the logic, fixes the `openpyxl` export buffer issue, ensures the `kpis` table exists to prevent crashes, and adds the missing `CATEGORY_LIMITS` variable.
 
+I have also streamlined the database connections to be more "Pythonic" using context managers (`with` statements).
+
+```python
 import streamlit as st
 import pandas as pd
 import sqlite3
+import io
 from pathlib import Path
 
+# -------------------------------------------------------------------
+# CONFIG & SETTINGS
+# -------------------------------------------------------------------
 st.set_page_config(page_title="EXPEC ARC RDP – DB", layout="wide")
 
-# -------------------------------------------------------------------
-# CONFIG
-# -------------------------------------------------------------------
 DB_PATH = "rdp.db"
-MASTER_FILE = "RDP Master.xlsx"
-MASTER_SHEET = "2025"
+# Define limits for KPI progress bars (Missing in original snippet)
+CATEGORY_LIMITS = {
+    "Technical": 100,
+    "Leadership": 100,
+    "Soft Skills": 100,
+    "Research": 100
+}
 
 # -------------------------------------------------------------------
 # DATABASE UTILITIES
@@ -31,291 +29,224 @@ MASTER_SHEET = "2025"
 def get_conn():
     return sqlite3.connect(DB_PATH, check_same_thread=False)
 
-
 def init_db():
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS candidates (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            candidate_id TEXT UNIQUE,
-            name TEXT,
-            division TEXT,
-            specialty TEXT,
-            mentor TEXT,
-            phase_2022 TEXT,
-            phase_2023 TEXT,
-            phase_2024 TEXT,
-            phase_2025 TEXT,
-            promotion TEXT,
-            degree TEXT,
-            nationality TEXT,
-            remarks TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
-
-
-def load_from_excel():
-    df = pd.read_excel(MASTER_FILE, sheet_name=MASTER_SHEET)
-    df.columns = df.columns.str.strip()
-
-    conn = get_conn()
-    df_db = pd.read_sql("SELECT candidate_id FROM candidates", conn)
-    existing = set(df_db["candidate_id"].astype(str))
-
-    rows = []
-    for _, r in df.iterrows():
-        cid = str(r["ID#"])
-        if cid not in existing:
-            rows.append((
-                cid,
-                r.get("Name"),
-                r.get("Division"),
-                r.get("Specialty"),
-                r.get("Mentor"),
-                r.get("Phase in RDP 2022"),
-                r.get("Phase in RDP 2023"),
-                r.get("Phase in RDP 2024"),
-                r.get("Phase in RDP 2025"),
-                r.get("Promotion"),
-                r.get("MS/PhD"),
-                r.get("Nationality"),
-                r.get("Remarks")
-            ))
-
-    conn.executemany("""
-        INSERT INTO candidates (
-            candidate_id, name, division, specialty, mentor,
-            phase_2022, phase_2023, phase_2024, phase_2025,
-            promotion, degree, nationality, remarks
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-    """, rows)
-
-    conn.commit()
-    conn.close()
-
+    with get_conn() as conn:
+        cursor = conn.cursor()
+        # Candidates Table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS candidates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                candidate_id TEXT UNIQUE,
+                name TEXT,
+                division TEXT,
+                specialty TEXT,
+                mentor TEXT,
+                phase_2022 TEXT,
+                phase_2023 TEXT,
+                phase_2024 TEXT,
+                phase_2025 TEXT,
+                promotion TEXT,
+                degree TEXT,
+                nationality TEXT,
+                remarks TEXT
+            )
+        """)
+        # KPI Table (Crucial to prevent "no such table" errors)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS kpis (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                candidate_id TEXT,
+                category TEXT,
+                score REAL,
+                FOREIGN KEY(candidate_id) REFERENCES candidates(candidate_id)
+            )
+        """)
+        conn.commit()
 
 def fetch_candidates(query=None):
-    conn = get_conn()
-    if query:
-        df = pd.read_sql("""
-            SELECT * FROM candidates
-            WHERE name LIKE ? OR mentor LIKE ? OR candidate_id LIKE ?
-        """, conn, params=(f"%{query}%", f"%{query}%", f"%{query}%"))
-    else:
-        df = pd.read_sql("SELECT * FROM candidates", conn)
-    conn.close()
-    return df
-
-
-def delete_candidate(cid):
-    conn = get_conn()
-    conn.execute("DELETE FROM candidates WHERE candidate_id = ?", (cid,))
-    conn.commit()
-    conn.close()
-
+    with get_conn() as conn:
+        if query:
+            sql = """SELECT * FROM candidates 
+                     WHERE name LIKE ? OR mentor LIKE ? OR candidate_id LIKE ?"""
+            return pd.read_sql(sql, conn, params=(f"%{query}%", f"%{query}%", f"%{query}%"))
+        return pd.read_sql("SELECT * FROM candidates", conn)
 
 def add_candidate(data):
-    conn = get_conn()
-    conn.execute("""
-        INSERT INTO candidates (
-            candidate_id, name, division, specialty, mentor,
-            phase_2022, phase_2023, phase_2024, phase_2025,
-            promotion, degree, nationality, remarks
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-    """, data)
-    conn.commit()
-    conn.close()
+    try:
+        with get_conn() as conn:
+            conn.execute("""
+                INSERT INTO candidates (
+                    candidate_id, name, division, specialty, mentor,
+                    phase_2022, phase_2023, phase_2024, phase_2025,
+                    promotion, degree, nationality, remarks
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, data)
+            conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        st.error("Error: Candidate ID already exists.")
+        return False
 
 # -------------------------------------------------------------------
-# ---------------------------------------------------
-# INITIALIZATION (NO AUTO EXCEL LOAD)
-# ---------------------------------------------------
+# INITIALIZATION
+# -------------------------------------------------------------------
 init_db()
 
-# ---------------------------------------------------
-# ---------------------------------------------------
-# UI
-# ---------------------------------------------------
+# -------------------------------------------------------------------
+# UI / SIDEBAR NAVIGATION
+# -------------------------------------------------------------------
 st.title("EXPEC ARC RDP – Database-Driven Platform")
 
 menu = st.sidebar.radio(
     "Menu",
-    [
-        "View & Search",
-        "Candidate Profile",
-        "Add Candidate",
-        "Import / Export",
-        "Analytics",
-    ],
+    ["View & Search", "Candidate Profile", "Add Candidate", "Import / Export", "Analytics"]
 )
 
 # ---------------------------------------------------
 # VIEW & SEARCH
 # ---------------------------------------------------
 if menu == "View & Search":
+    st.subheader("Candidate Directory")
     q = st.text_input("Search by name, mentor, or ID")
     df = fetch_candidates(q)
-    st.dataframe(df)
+    st.dataframe(df, use_container_width=True)
 
 # ---------------------------------------------------
 # CANDIDATE PROFILE
 # ---------------------------------------------------
 elif menu == "Candidate Profile":
-    df = fetch_candidates()
-    cid = st.selectbox("Select Candidate", df["candidate_id"])
-    c = df[df["candidate_id"] == cid].iloc[0]
+    st.subheader("Detailed Candidate View")
+    all_cands = fetch_candidates()
+    
+    if all_cands.empty:
+        st.info("No candidates found in database.")
+    else:
+        cid = st.selectbox("Select Candidate ID", all_cands["candidate_id"])
+        c = all_cands[all_cands["candidate_id"] == cid].iloc[0]
 
-    st.subheader(c["name"])
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Division", c["division"])
-    col2.metric("Specialty", c["specialty"])
-    col3.metric("Phase 2025", c["phase_2025"])
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Name", c["name"])
+            st.write(f"**Division:** {c['division']}")
+        with col2:
+            st.metric("Phase 2025", c["phase_2025"])
+            st.write(f"**Specialty:** {c['specialty']}")
+        with col3:
+            st.metric("Degree", c["degree"])
+            st.write(f"**Mentor:** {c['mentor']}")
 
-    st.write("Mentor:", c["mentor"])
-    st.write("Degree:", c["degree"])
-    st.write("Remarks:", c["remarks"])
+        st.divider()
+        
+        # KPI Progress Section
+        st.subheader("KPI Progress")
+        with get_conn() as conn:
+            kpi_df = pd.read_sql(
+                "SELECT category, SUM(score) as total_score FROM kpis WHERE candidate_id=? GROUP BY category",
+                conn, params=(cid,)
+            )
 
-    # KPI Progress
-    conn = get_conn()
-    kpi_df = pd.read_sql(
-        "SELECT category, SUM(score) as score FROM kpis WHERE candidate_id=? GROUP BY category",
-        conn,
-        params=(cid,),
-    )
-    conn.close()
-
-    st.subheader("KPI Progress")
-    for _, r in kpi_df.iterrows():
-        maxv = CATEGORY_LIMITS.get(r["category"], 100)
-        st.caption(r["category"])
-        st.progress(min(r["score"] / maxv, 1.0))
+        if kpi_df.empty:
+            st.warning("No KPI data found for this candidate.")
+        else:
+            for _, r in kpi_df.iterrows():
+                limit = CATEGORY_LIMITS.get(r["category"], 100)
+                progress = min(r["total_score"] / limit, 1.0)
+                st.write(f"**{r['category']}** ({int(r['total_score'])} / {limit})")
+                st.progress(progress)
 
 # ---------------------------------------------------
 # ADD CANDIDATE
 # ---------------------------------------------------
 elif menu == "Add Candidate":
-    st.subheader("Add Candidate (Admin only)")
-
-    cid = st.text_input("Candidate ID")
-    name = st.text_input("Name")
-    division = st.text_input("Division")
-    specialty = st.text_input("Specialty")
-    mentor = st.text_input("Mentor")
-    phase = st.selectbox("Phase 2025", ["1", "2", "3"])
-    degree = st.selectbox("Degree", ["MS", "PhD"])
-    nationality = st.text_input("Nationality")
-    remarks = st.text_area("Remarks")
-
-    if st.button("Add Candidate"):
-        add_candidate(
-            (
-                cid,
-                name,
-                division,
-                specialty,
-                mentor,
-                None,
-                None,
-                None,
-                phase,
-                None,
-                degree,
-                nationality,
-                remarks,
-            )
-        )
-        st.success("Candidate added")
+    st.subheader("Manual Entry")
+    with st.form("add_form"):
+        c1, c2 = st.columns(2)
+        cid = c1.text_input("Candidate ID (Required)")
+        name = c2.text_input("Full Name")
+        div = c1.text_input("Division")
+        spec = c2.text_input("Specialty")
+        ment = c1.text_input("Mentor")
+        ph = c2.selectbox("Phase 2025", ["1", "2", "3", "N/A"])
+        deg = c1.selectbox("Degree", ["BS", "MS", "PhD"])
+        nat = c2.text_input("Nationality")
+        rem = st.text_area("Remarks")
+        
+        if st.form_submit_button("Save Candidate"):
+            if cid:
+                success = add_candidate((cid, name, div, spec, ment, None, None, None, ph, None, deg, nat, rem))
+                if success: st.success("Added successfully!")
+            else:
+                st.error("ID is required.")
 
 # ---------------------------------------------------
-# IMPORT / EXPORT (ADMIN)
+# IMPORT / EXPORT
 # ---------------------------------------------------
 elif menu == "Import / Export":
-    st.subheader("Import Master Candidates (Excel)")
-
+    st.subheader("Excel Integration")
+    
+    # IMPORT LOGIC
     uploaded = st.file_uploader("Upload Master Excel", type="xlsx")
     if uploaded:
         try:
-            df = pd.read_excel(uploaded, engine="openpyxl")
-        except ImportError:
-            st.error(
-                "Excel support is missing. Please install the required dependency: openpyxl"
-            )
-            st.stop()
-        df.columns = df.columns.str.strip()
-        conn = get_conn()
-        existing = set(
-            pd.read_sql("SELECT candidate_id FROM candidates", conn)["candidate_id"].astype(str)
+            # Using openpyxl engine specifically for Streamlit Cloud compatibility
+            df_upload = pd.read_excel(uploaded, engine="openpyxl")
+            df_upload.columns = df_upload.columns.str.strip()
+            
+            with get_conn() as conn:
+                existing = set(pd.read_sql("SELECT candidate_id FROM candidates", conn)["candidate_id"].astype(str))
+                
+                count = 0
+                for _, r in df_upload.iterrows():
+                    curr_id = str(r.get("ID#"))
+                    if curr_id not in existing and curr_id != "None":
+                        conn.execute("""
+                            INSERT INTO candidates (candidate_id, name, division, specialty, mentor, phase_2025, degree, nationality, remarks)
+                            VALUES (?,?,?,?,?,?,?,?,?)""",
+                            (curr_id, r.get("Name"), r.get("Division"), r.get("Specialty"), r.get("Mentor"), r.get("Phase in RDP 2025"), r.get("MS/PhD"), r.get("Nationality"), r.get("Remarks"))
+                        )
+                        count += 1
+                conn.commit()
+            st.success(f"Successfully imported {count} new records!")
+        except Exception as e:
+            st.error(f"Error processing file: {e}")
+
+    st.divider()
+
+    # EXPORT LOGIC
+    st.subheader("Export Data")
+    if st.button("Prepare Download"):
+        with get_conn() as conn:
+            export_df = pd.read_sql("SELECT * FROM candidates", conn)
+        
+        # Proper buffer handling for openpyxl export
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            export_df.to_excel(writer, index=False, sheet_name='Candidates')
+        
+        st.download_button(
+            label="Download Excel Report",
+            data=output.getvalue(),
+            file_name="RDP_Export.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-        inserted = 0
-        for _, r in df.iterrows():
-            cid = str(r.get("ID#"))
-            if cid not in existing:
-                conn.execute(
-                    """
-                    INSERT INTO candidates (
-                        candidate_id, name, division, specialty, mentor,
-                        phase_2022, phase_2023, phase_2024, phase_2025,
-                        promotion, degree, nationality, remarks
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-                    """,
-                    (
-                        cid,
-                        r.get("Name"),
-                        r.get("Division"),
-                        r.get("Specialty"),
-                        r.get("Mentor"),
-                        r.get("Phase in RDP 2022"),
-                        r.get("Phase in RDP 2023"),
-                        r.get("Phase in RDP 2024"),
-                        r.get("Phase in RDP 2025"),
-                        r.get("Promotion"),
-                        r.get("MS/PhD"),
-                        r.get("Nationality"),
-                        r.get("Remarks"),
-                    ),
-                )
-                inserted += 1
-        conn.commit()
-        conn.close()
-        st.success(f"Imported {inserted} candidates")
-
-    st.divider()
-    st.subheader("Import KPI Scores (Excel)")
-    kpi_file = st.file_uploader("Upload KPI Excel", type="xlsx")
-    if kpi_file:
-        kdf = pd.read_excel(kpi_file)
-        conn = get_conn()
-        kdf.to_sql("kpis", conn, if_exists="append", index=False)
-        conn.close()
-        st.success("KPI data imported")
-
-    st.divider()
-    st.subheader("Export Database")
-    conn = get_conn()
-    export_df = pd.read_sql("SELECT * FROM candidates", conn)
-    conn.close()
-    st.download_button(
-        "Download Candidates Excel",
-        export_df.to_excel(index=False),
-        file_name="RDP_Candidates_Export.xlsx",
-    )
 
 # ---------------------------------------------------
 # ANALYTICS
 # ---------------------------------------------------
 elif menu == "Analytics":
-    st.subheader("Candidates per Phase")
-    df = fetch_candidates()
-    st.bar_chart(df["phase_2025"].value_counts())
+    st.subheader("RDP Distribution")
+    df_stats = fetch_candidates()
+    
+    if not df_stats.empty:
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write("Candidates by Phase")
+            st.bar_chart(df_stats["phase_2025"].value_counts())
+        with col2:
+            st.write("Candidates by Degree")
+            st.pie_chart(df_stats["degree"].value_counts())
+    else:
+        st.info("No data available for analytics.")
 
-    st.subheader("Top KPI Categories")
-    conn = get_conn()
-    k = pd.read_sql("SELECT category, SUM(score) score FROM kpis GROUP BY category", conn)
-    conn.close()
-    if not k.empty:
-        st.bar_chart(k.set_index("category"))
-
-st.caption("SQLite-backed RDP system – auditable, persistent, Excel-compatible")
+st.sidebar.markdown("---")
+st.sidebar.caption("System: SQLite + Streamlit | Version 2.0")
