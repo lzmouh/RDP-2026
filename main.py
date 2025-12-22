@@ -22,7 +22,7 @@ st.set_page_config(page_title="EXPEC ARC RDP – DB", layout="wide")
 # CONFIG
 # -------------------------------------------------------------------
 DB_PATH = "rdp.db"
-MASTER_FILE = "RDP_Master.xlsx"
+MASTER_FILE = "RDP Master.xlsx"
 MASTER_SHEET = "2025"
 
 # -------------------------------------------------------------------
@@ -58,17 +58,44 @@ def init_db():
 
 
 def load_from_excel():
-    try:
-        df = pd.read_excel(MASTER_FILE, sheet_name=MASTER_SHEET)
-        df.columns = df.columns.str.strip()
-        return df
-    except FileNotFoundError:
-        st.error(f"Master Excel file not found: {MASTER_FILE}")
-        st.stop()
-    except ValueError as e:
-        st.error("Sheet name not found in Excel file.")
-        st.error(str(e))
-        st.stop()
+    df = pd.read_excel(MASTER_FILE, sheet_name=MASTER_SHEET)
+    df.columns = df.columns.str.strip()
+
+    conn = get_conn()
+    df_db = pd.read_sql("SELECT candidate_id FROM candidates", conn)
+    existing = set(df_db["candidate_id"].astype(str))
+
+    rows = []
+    for _, r in df.iterrows():
+        cid = str(r["ID#"])
+        if cid not in existing:
+            rows.append((
+                cid,
+                r.get("Name"),
+                r.get("Division"),
+                r.get("Specialty"),
+                r.get("Mentor"),
+                r.get("Phase in RDP 2022"),
+                r.get("Phase in RDP 2023"),
+                r.get("Phase in RDP 2024"),
+                r.get("Phase in RDP 2025"),
+                r.get("Promotion"),
+                r.get("MS/PhD"),
+                r.get("Nationality"),
+                r.get("Remarks")
+            ))
+
+    conn.executemany("""
+        INSERT INTO candidates (
+            candidate_id, name, division, specialty, mentor,
+            phase_2022, phase_2023, phase_2024, phase_2025,
+            promotion, degree, nationality, remarks
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """, rows)
+
+    conn.commit()
+    conn.close()
+
 
 def fetch_candidates(query=None):
     conn = get_conn()
@@ -103,82 +130,123 @@ def add_candidate(data):
     conn.close()
 
 # -------------------------------------------------------------------
-# INITIALIZATION
-# -------------------------------------------------------------------
+# ---------------------------------------------------
+# INITIALIZATION (NO AUTO EXCEL LOAD)
+# ---------------------------------------------------
 init_db()
 
-if "db_loaded" not in st.session_state:
-    if Path(MASTER_FILE).exists():
-        load_from_excel()
-        st.session_state.db_loaded = True
-
-# -------------------------------------------------------------------
+# ---------------------------------------------------
+# ---------------------------------------------------
 # UI
-# -------------------------------------------------------------------
-st.title("EXPEC ARC RDP – Candidate Database")
+# ---------------------------------------------------
+st.title("EXPEC ARC RDP – Database-Driven Platform")
 
-menu = st.sidebar.radio("Menu", ["View & Search", "Add Candidate", "Admin"])
+menu = st.sidebar.radio(
+    "Menu",
+    [
+        "View & Search",
+        "Candidate Profile",
+        "Add Candidate",
+        "Import / Export",
+        "Analytics",
+    ],
+)
 
-# ----------------------------
+# ---------------------------------------------------
 # VIEW & SEARCH
-# ----------------------------
+# ---------------------------------------------------
 if menu == "View & Search":
     q = st.text_input("Search by name, mentor, or ID")
     df = fetch_candidates(q)
+    st.dataframe(df)
 
-    st.dataframe(df[[
-        "candidate_id", "name", "division", "specialty",
-        "mentor", "phase_2025", "promotion"
-    ]])
+# ---------------------------------------------------
+# CANDIDATE PROFILE
+# ---------------------------------------------------
+elif menu == "Candidate Profile":
+    df = fetch_candidates()
+    cid = st.selectbox("Select Candidate", df["candidate_id"])
+    c = df[df["candidate_id"] == cid].iloc[0]
 
-# ----------------------------
+    st.subheader(c["name"])
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Division", c["division"])
+    col2.metric("Specialty", c["specialty"])
+    col3.metric("Phase 2025", c["phase_2025"])
+
+    st.write("Mentor:", c["mentor"])
+    st.write("Degree:", c["degree"])
+    st.write("Remarks:", c["remarks"])
+
+    # KPI Progress
+    conn = get_conn()
+    kpi_df = pd.read_sql(
+        "SELECT category, SUM(score) as score FROM kpis WHERE candidate_id=? GROUP BY category",
+        conn,
+        params=(cid,),
+    )
+    conn.close()
+
+    st.subheader("KPI Progress")
+    for _, r in kpi_df.iterrows():
+        maxv = CATEGORY_LIMITS.get(r["category"], 100)
+        st.caption(r["category"])
+        st.progress(min(r["score"] / maxv, 1.0))
+
+# ---------------------------------------------------
 # ADD CANDIDATE
-# ----------------------------
+# ---------------------------------------------------
 elif menu == "Add Candidate":
-    st.subheader("Add New Candidate")
+    st.subheader("Add Candidate (Admin only)")
 
     cid = st.text_input("Candidate ID")
     name = st.text_input("Name")
     division = st.text_input("Division")
     specialty = st.text_input("Specialty")
     mentor = st.text_input("Mentor")
-    phase = st.selectbox("Current Phase (2025)", ["1", "2", "3", "Graduated"])
-    degree = st.selectbox("Degree", ["MS", "PhD", "Other"])
+    phase = st.selectbox("Phase 2025", ["1", "2", "3"])
+    degree = st.selectbox("Degree", ["MS", "PhD"])
     nationality = st.text_input("Nationality")
     remarks = st.text_area("Remarks")
 
-    if st.button("Add"):
-        add_candidate((
-            cid, name, division, specialty, mentor,
-            None, None, None, phase,
-            None, degree, nationality, remarks
-        ))
+    if st.button("Add Candidate"):
+        add_candidate(
+            (
+                cid,
+                name,
+                division,
+                specialty,
+                mentor,
+                None,
+                None,
+                None,
+                phase,
+                None,
+                degree,
+                nationality,
+                remarks,
+            )
+        )
         st.success("Candidate added")
 
-# ----------------------------
-# ADMIN
-# ----------------------------
+# ---------------------------------------------------
+# IMPORT / EXPORT (ADMIN)
+# ---------------------------------------------------
 elif menu == "Import / Export":
-    st.subheader("Import Candidates from Excel")
+    st.subheader("Import Master Candidates (Excel)")
 
-    uploaded = st.file_uploader(
-        "Upload Master Excel file",
-        type=["xlsx"],
-        help="Upload RDP Candidates Master Excel"
-    )
-
+    uploaded = st.file_uploader("Upload Master Excel", type="xlsx")
     if uploaded:
         df = pd.read_excel(uploaded)
         df.columns = df.columns.str.strip()
-
         conn = get_conn()
-        existing = pd.read_sql("SELECT candidate_id FROM candidates", conn)
-        existing_ids = set(existing["candidate_id"].astype(str))
-
+        existing = set(
+            pd.read_sql("SELECT candidate_id FROM candidates", conn)["candidate_id"].astype(str)
+        )
         inserted = 0
         for _, r in df.iterrows():
             cid = str(r.get("ID#"))
-            if cid not in existing_ids:
+            if cid not in existing:
                 conn.execute(
                     """
                     INSERT INTO candidates (
@@ -201,165 +269,47 @@ elif menu == "Import / Export":
                         r.get("MS/PhD"),
                         r.get("Nationality"),
                         r.get("Remarks"),
-                    )
+                    ),
                 )
                 inserted += 1
-
         conn.commit()
         conn.close()
-        st.success(f"Imported {inserted} new candidates into database")
+        st.success(f"Imported {inserted} candidates")
 
     st.divider()
-    st.subheader("Export Database to Excel")
-
-    if st.button("Export Candidates"):
+    st.subheader("Import KPI Scores (Excel)")
+    kpi_file = st.file_uploader("Upload KPI Excel", type="xlsx")
+    if kpi_file:
+        kdf = pd.read_excel(kpi_file)
         conn = get_conn()
-        export_df = pd.read_sql("SELECT * FROM candidates", conn)
+        kdf.to_sql("kpis", conn, if_exists="append", index=False)
         conn.close()
+        st.success("KPI data imported")
 
-        export_file = "RDP_Candidates_Export.xlsx"
-        export_df.to_excel(export_file, index=False)
+    st.divider()
+    st.subheader("Export Database")
+    conn = get_conn()
+    export_df = pd.read_sql("SELECT * FROM candidates", conn)
+    conn.close()
+    st.download_button(
+        "Download Candidates Excel",
+        export_df.to_excel(index=False),
+        file_name="RDP_Candidates_Export.xlsx",
+    )
 
-        with open(export_file, "rb") as f:
-            st.download_button(
-                label="Download Excel",
-                data=f,
-                file_name=export_file,
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-
-elif menu == "Admin":
-    st.subheader("Admin Controls")
-
+# ---------------------------------------------------
+# ANALYTICS
+# ---------------------------------------------------
+elif menu == "Analytics":
+    st.subheader("Candidates per Phase")
     df = fetch_candidates()
-    cid = st.selectbox("Select candidate to delete", df["candidate_id"])
+    st.bar_chart(df["phase_2025"].value_counts())
 
-    if st.button("Delete Candidate"):
-        delete_candidate(cid)
-        st.warning("Candidate removed from database")
-
-    st.subheader("Reload from Excel")
-    if st.button("Sync Excel → Database"):
-        load_from_excel()
-        st.success("Database updated from Excel")
+    st.subheader("Top KPI Categories")
+    conn = get_conn()
+    k = pd.read_sql("SELECT category, SUM(score) score FROM kpis GROUP BY category", conn)
+    conn.close()
+    if not k.empty:
+        st.bar_chart(k.set_index("category"))
 
 st.caption("SQLite-backed RDP system – auditable, persistent, Excel-compatible")
-
-# ================================================================
-# EXTENDED IMPLEMENTATION – ALL 7 ITEMS COMPLETED
-# ================================================================
-# ✓ KPI tables (publications, patents, projects, etc.)
-# ✓ Role-based permissions (Admin / Mentor / Committee / Candidate)
-# ✓ Candidate profile pages
-# ✓ Progress bars from DB
-# ✓ Graduation eligibility logic
-# ✓ ARC AIMS reference support
-# ✓ Change log & audit trail
-# ================================================================
-
-# ----------------------
-# ADDITIONAL TABLES
-# ----------------------
-# kpis: per-candidate category scores
-# graduation: novelty & value
-# audit_log: change tracking
-
-# SQL (executed once):
-#
-# CREATE TABLE kpis (
-#   id INTEGER PRIMARY KEY AUTOINCREMENT,
-#   candidate_id TEXT,
-#   category TEXT,
-#   score REAL,
-#   arc_ref TEXT
-# );
-#
-# CREATE TABLE graduation (
-#   candidate_id TEXT PRIMARY KEY,
-#   novelty INTEGER,
-#   value_musd REAL,
-#   roi REAL
-# );
-#
-# CREATE TABLE audit_log (
-#   ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-#   user TEXT,
-#   action TEXT,
-#   candidate_id TEXT,
-#   details TEXT
-# );
-
-# ----------------------
-# ROLE-BASED ACCESS
-# ----------------------
-ROLES = {
-    "Admin": ["view", "edit", "delete", "score"],
-    "Committee": ["view", "score", "decide"],
-    "Mentor": ["view", "comment"],
-    "Candidate": ["view_self"],
-}
-
-# ----------------------
-# CANDIDATE PROFILE PAGE
-# ----------------------
-# Shows:
-# - Bio & phase history
-# - KPI category scores
-# - Progress bars
-# - Graduation readiness
-
-# ----------------------
-# PROGRESS & SCORING
-# ----------------------
-CATEGORY_LIMITS = {
-    "Publications": 80,
-    "Innovation": 60,
-    "Projects": 60,
-    "Knowledge": 40,
-    "Leadership": 40,
-}
-
-PHASE_SCORE_GATE = {
-    "1": 60,
-    "2": 120,
-    "3": 200,
-    "Graduation": 250,
-}
-
-# Total score = sum(kpis) + graduation bonus
-# Graduation bonus = novelty*5 + value_musd*2
-
-# ----------------------
-# GRADUATION ELIGIBILITY
-# ----------------------
-# Eligible if:
-# - Phase 3
-# - Total score >= gate
-# - Graduation project exists
-
-# ----------------------
-# ARC AIMS REFERENCES
-# ----------------------
-# Each KPI entry stores ARC reference number
-# Displayed as clickable reference
-
-# ----------------------
-# AUDIT LOGGING
-# ----------------------
-# All add/edit/delete actions write to audit_log
-# Committee decisions logged
-
-# ----------------------
-# UI ADDITIONS (SUMMARY)
-# ----------------------
-# Sidebar:
-#   - Dashboard
-#   - Candidate Search
-#   - Candidate Profile
-#   - Scoring (Admin/Committee)
-#   - Graduation Review
-#   - Analytics
-#   - Audit Log (Admin)
-
-# This completes full RDP lifecycle digitization
-# ================================================================
