@@ -58,44 +58,17 @@ def init_db():
 
 
 def load_from_excel():
-    df = pd.read_excel(MASTER_FILE, sheet_name=MASTER_SHEET)
-    df.columns = df.columns.str.strip()
-
-    conn = get_conn()
-    df_db = pd.read_sql("SELECT candidate_id FROM candidates", conn)
-    existing = set(df_db["candidate_id"].astype(str))
-
-    rows = []
-    for _, r in df.iterrows():
-        cid = str(r["ID#"])
-        if cid not in existing:
-            rows.append((
-                cid,
-                r.get("Name"),
-                r.get("Division"),
-                r.get("Specialty"),
-                r.get("Mentor"),
-                r.get("Phase in RDP 2022"),
-                r.get("Phase in RDP 2023"),
-                r.get("Phase in RDP 2024"),
-                r.get("Phase in RDP 2025"),
-                r.get("Promotion"),
-                r.get("MS/PhD"),
-                r.get("Nationality"),
-                r.get("Remarks")
-            ))
-
-    conn.executemany("""
-        INSERT INTO candidates (
-            candidate_id, name, division, specialty, mentor,
-            phase_2022, phase_2023, phase_2024, phase_2025,
-            promotion, degree, nationality, remarks
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-    """, rows)
-
-    conn.commit()
-    conn.close()
-
+    try:
+        df = pd.read_excel(MASTER_FILE, sheet_name=MASTER_SHEET)
+        df.columns = df.columns.str.strip()
+        return df
+    except FileNotFoundError:
+        st.error(f"Master Excel file not found: {MASTER_FILE}")
+        st.stop()
+    except ValueError as e:
+        st.error("Sheet name not found in Excel file.")
+        st.error(str(e))
+        st.stop()
 
 def fetch_candidates(query=None):
     conn = get_conn()
