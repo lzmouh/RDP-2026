@@ -59,14 +59,11 @@ def sync_excel_to_db():
 
 def get_all_candidates(search_query=None):
     with get_connection() as conn:
+        # We select everything to allow "Last Known Phase" logic in the UI
+        sql = "SELECT * FROM candidates"
         if search_query:
-            # Explicitly naming columns ensures we have the historical phases for logic
-            query = """SELECT candidate_id, name, division, specialty, mentor, 
-                       phase_2022, phase_2023, phase_2024, phase_2025, 
-                       degree, nationality, remarks FROM candidates 
-                       WHERE name LIKE ? OR candidate_id LIKE ?"""
-            return pd.read_sql(query, conn, params=(f"%{search_query}%", f"%{search_query}%"))
-        return pd.read_sql("SELECT * FROM candidates", conn)
+            sql += f" WHERE name LIKE '%{search_query}%' OR candidate_id LIKE '%{search_query}%'"
+        return pd.read_sql(sql, conn)
         
 def update_candidate(data):
     """Saves changes from the UI back to the DB."""
