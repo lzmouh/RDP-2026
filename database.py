@@ -73,3 +73,29 @@ def update_candidate(data):
             VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         """, data)
         conn.commit()
+
+
+def add_score(candidate_id, category, score, evaluator="System"):
+    """Inserts a new score entry for a candidate."""
+    with get_connection() as conn:
+        conn.execute("""
+            INSERT INTO kpis (candidate_id, category, score)
+            VALUES (?, ?, ?)
+        """, (candidate_id, category, score))
+        conn.commit()
+
+def get_candidate_scores(candidate_id):
+    """Retrieves all scores for a specific candidate."""
+    with get_connection() as conn:
+        query = "SELECT category, score FROM kpis WHERE candidate_id = ?"
+        return pd.read_sql(query, conn, params=(candidate_id,))
+
+def get_score_summary():
+    """Aggregates total scores for all candidates for the Analytics view."""
+    with get_connection() as conn:
+        query = """
+            SELECT candidate_id, SUM(score) as total_score, COUNT(category) as kpi_count
+            FROM kpis 
+            GROUP BY candidate_id
+        """
+        return pd.read_sql(query, conn)
