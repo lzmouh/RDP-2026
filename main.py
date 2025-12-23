@@ -28,7 +28,7 @@ if "selected_candidate_id" not in st.session_state:
 # We use a selectbox or sidebar for high-level navigation, 
 # but "link" the dashboard to the profile tab.
 menu = ["📊 Dashboard", "👤 Candidate Profile", "🎯 Scoring Matrix", "⚙️ Administration"]
-choice = st.sidebar.selectbox("Navigation", menu)
+choice = st.sidebar("Navigation", menu)
 
 # --- TAB: DASHBOARD ---
 if choice == "📊 Dashboard":
