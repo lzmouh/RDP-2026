@@ -24,12 +24,17 @@ def get_latest_phase(r):
 if "selected_candidate_id" not in st.session_state:
     st.session_state.selected_candidate_id = None
 
-# --- UI TABS ---
-# We use a selectbox or sidebar for high-level navigation, 
-# but "link" the dashboard to the profile tab.
-menu = ["📊 Dashboard", "👤 Candidate Profile", "🎯 Scoring Matrix", "⚙️ Administration"]
-choice = st.sidebar.button("Navigation", menu)
-
+# --- SIDEBAR FIXED MENU ---
+with st.sidebar:
+    st.title("Navigation")
+    # This creates a fixed vertical menu
+    choice = st.radio(
+        "Select a Module:",
+        ["📊 Dashboard", "👤 Candidate Profile", "🎯 Scoring Matrix", "⚙️ Administration"]
+    )
+    st.markdown("---")
+    st.caption(f"Database: {db.DB_PATH}")
+    
 # --- TAB: DASHBOARD ---
 if choice == "📊 Dashboard":
     st.title("Candidate Search & Overview")
