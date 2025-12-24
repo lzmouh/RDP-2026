@@ -3,179 +3,164 @@ import pandas as pd
 import plotly.express as px
 import os
 
-# --- PAGE CONFIG ---
-st.set_page_config(page_title="RDP Management System", layout="wide")
+# --- 1. PAGE CONFIG & STYLING ---
+st.set_page_config(page_title="RDP Researcher Portal", layout="wide")
 
-# --- AUTH CONFIG ---
-ADMIN_PASSWORD = "admin123"
-MENTOR_DEFAULT_PW = "mentor123"
-
-# --- DATA LOADING ---
+# --- 2. DATA LOADING (Handles Column Name Errors) ---
 DB_FILE = 'RDP Master.xlsx - 2025.csv'
 
-@st.cache_data
 def load_data():
     if os.path.exists(DB_FILE):
         df = pd.read_csv(DB_FILE)
-        # CRITICAL FIX: Strip all leading/trailing spaces from column headers
+        # Normalize headers to fix KeyErrors (removes trailing spaces)
         df.columns = df.columns.str.strip()
-        # Ensure ID# is string and cleaned
+        # Ensure ID# is a string for matching
         if 'ID#' in df.columns:
             df['ID#'] = df['ID#'].astype(str).str.strip()
         return df
     return None
 
-# Initialize Session State
+# --- 3. SESSION STATE INITIALIZATION ---
 if 'df' not in st.session_state:
     st.session_state.df = load_data()
-if 'authenticated' not in st.session_state:
-    st.session_state.authenticated = False
-if 'user_role' not in st.session_state:
-    st.session_state.user_role = None
-if 'user_id' not in st.session_state:
-    st.session_state.user_id = None
-if 'page' not in st.session_state:
-    st.session_state.page = "Main"
 
-# --- LOGIN SCREEN ---
+if 'auth' not in st.session_state:
+    st.session_state.auth = {"status": False, "role": None, "user_id": None}
+
+if 'page' not in st.session_state:
+    st.session_state.page = "Dashboard"
+
+# --- 4. LOGIN SYSTEM ---
 def login_screen():
-    st.title("🚀 RDP Researcher Development Portal")
+    st.title("🔐 RDP Development Program Login")
     
-    tab1, tab2, tab3 = st.tabs(["Admin Access", "Candidate Access", "Mentor Access"])
+    if st.session_state.df is None:
+        st.error("Database file not found. Please ensure 'RDP Master.xlsx - 2025.csv' is in the folder.")
+        st.stop()
+
+    tab1, tab2, tab3 = st.tabs(["Admin", "Candidate", "Mentor"])
     
     with tab1:
-        with st.form("admin_login"):
-            pw = st.text_input("Password", type="password")
-            if st.form_submit_button("Login as Admin"):
-                if pw == ADMIN_PASSWORD:
-                    st.session_state.authenticated = True
-                    st.session_state.user_role = "Admin"
+        with st.form("admin_form"):
+            pw = st.text_input("Admin Password", type="password")
+            if st.form_submit_button("Login"):
+                if pw == "admin123":
+                    st.session_state.auth = {"status": True, "role": "Admin", "user_id": "Admin"}
                     st.rerun()
-                else: st.error("Incorrect Admin Password")
+                else: st.error("Invalid password")
 
     with tab2:
-        with st.form("cand_login"):
+        with st.form("cand_form"):
             c_id = st.text_input("Candidate ID#")
-            c_pw = st.text_input("Password (Use your ID#)", type="password")
+            c_pw = st.text_input("Password (ID#)", type="password")
             if st.form_submit_button("Login"):
                 if c_id in st.session_state.df['ID#'].values and c_id == c_pw:
-                    st.session_state.authenticated = True
-                    st.session_state.user_role = "Candidate"
-                    st.session_state.user_id = c_id
+                    st.session_state.auth = {"status": True, "role": "Candidate", "user_id": c_id}
                     st.rerun()
-                else: st.error("Invalid ID or Password")
+                else: st.error("ID not found or password incorrect")
 
     with tab3:
-        with st.form("mentor_login"):
-            m_list = sorted(st.session_state.df['Mentor'].dropna().unique().tolist())
-            m_name = st.selectbox("Select Your Name", m_list)
-            m_pw = st.text_input("Password", type="password")
-            if st.form_submit_button("Login as Mentor"):
-                if m_pw == MENTOR_DEFAULT_PW:
-                    st.session_state.authenticated = True
-                    st.session_state.user_role = "Mentor"
-                    st.session_state.user_id = m_name
+        with st.form("mentor_form"):
+            mentors = sorted(st.session_state.df['Mentor'].dropna().unique().tolist())
+            m_name = st.selectbox("Select Your Name", mentors)
+            m_pw = st.text_input("Mentor Password", type="password")
+            if st.form_submit_button("Login"):
+                if m_pw == "mentor123":
+                    st.session_state.auth = {"status": True, "role": "Mentor", "user_id": m_name}
                     st.rerun()
-                else: st.error("Incorrect Mentor Password")
+                else: st.error("Incorrect Mentor password")
 
-if not st.session_state.authenticated:
+# --- 5. MAIN APP FLOW ---
+if not st.session_state.auth["status"]:
     login_screen()
-    st.stop()
-
-# --- SIDEBAR & LOGOUT ---
-st.sidebar.subheader(f"Logged in as: {st.session_state.user_role}")
-if st.sidebar.button("Log Out"):
-    st.session_state.authenticated = False
-    st.rerun()
-
-df = st.session_state.df
-
-# --- NAVIGATION ---
-if st.session_state.user_role == "Admin":
-    choice = st.sidebar.radio("Navigation", ["Candidate Table", "Add Candidate", "Analytics"])
-elif st.session_state.user_role == "Mentor":
-    choice = "Mentor View"
 else:
-    choice = "My Profile"
+    # Sidebar Navigation
+    role = st.session_state.auth["role"]
+    st.sidebar.title(f"Welcome, {st.session_state.auth['user_id']}")
+    
+    if st.sidebar.button("🚪 Logout"):
+        st.session_state.auth = {"status": False, "role": None, "user_id": None}
+        st.rerun()
 
-# --- 1. ADMIN TABLE ---
-if choice == "Candidate Table":
-    st.title("Program Participants Overview")
-    
-    # Select specific columns to display
-    cols_to_show = ['ID#', 'Name', 'Division', 'Mentor', 'Specialty', 'Phase in RDP 2024']
-    display_df = df[cols_to_show].copy()
-    display_df.insert(0, 'No.', range(1, len(display_df) + 1))
-    
-    # Custom interactive table headers
-    h_cols = st.columns([0.5, 1, 2, 1.5, 2, 2, 1])
-    headers = ["#", "ID#", "Name", "Division", "Mentor", "Specialty", "Phase"]
-    for i, h in enumerate(headers): h_cols[i].markdown(f"**{h}**")
-    
-    for _, row in display_df.iterrows():
-        r_cols = st.columns([0.5, 1, 2, 1.5, 2, 2, 1])
-        r_cols[0].write(row['No.'])
-        if r_cols[1].button(row['ID#'], key=f"btn_{row['ID#']}"):
-            st.session_state.page = "Profile"
-            st.session_state.selected_id = row['ID#']
-            st.rerun()
-        r_cols[2].write(row['Name'])
-        r_cols[3].write(row['Division'])
-        r_cols[4].write(row['Mentor'])
-        r_cols[5].write(row['Specialty'])
-        r_cols[6].write(row['Phase in RDP 2024'])
+    df = st.session_state.df
 
-# --- 2. ANALYTICS ---
-elif choice == "Analytics":
-    st.title("RDP Program Analytics")
-    c1, c2 = st.columns(2)
-    with c1:
-        fig1 = px.bar(df, x='Phase in RDP 2024', title="Candidates vs Phase", color='Phase in RDP 2024')
-        st.plotly_chart(fig1, use_container_width=True)
-    with c2:
-        fig2 = px.bar(df, x='Division', title="Candidates vs Division", color='Division')
-        st.plotly_chart(fig2, use_container_width=True)
-    
-    st.divider()
-    st.subheader("Interactive Explorer")
-    sel_div = st.multiselect("Filter by Division", options=df['Division'].unique())
-    sel_ph = st.multiselect("Filter by Phase", options=sorted(df['Phase in RDP 2024'].unique()))
-    
-    filt_df = df.copy()
-    if sel_div: filt_df = filt_df[filt_df['Division'].isin(sel_div)]
-    if sel_ph: filt_df = filt_df[filt_df['Phase in RDP 2024'].isin(sel_ph)]
-    st.dataframe(filt_df)
-
-# --- 3. MENTOR VIEW ---
-elif choice == "Mentor View":
-    st.title(f"Candidates Assigned to {st.session_state.user_id}")
-    mentor_df = df[df['Mentor'] == st.session_state.user_id]
-    st.table(mentor_df[['ID#', 'Name', 'Division', 'Phase in RDP 2024']])
-
-# --- 4. PROFILE PAGE (Drill-down or Candidate View) ---
-if choice == "My Profile" or (st.session_state.page == "Profile"):
-    target_id = st.session_state.user_id if choice == "My Profile" else st.session_state.selected_id
-    cand_data = df[df['ID#'] == target_id].iloc[0]
-    
-    st.title(f"Profile: {cand_data['Name']}")
-    
-    col_img, col_txt = st.columns([1, 2])
-    with col_img:
-        st.image("https://via.placeholder.com/150", caption=f"ID: {target_id}")
-        st.file_uploader("Update Photo", type=['jpg', 'png'])
+    # --- ADMIN VIEW ---
+    if role == "Admin":
+        menu = st.sidebar.radio("Navigation", ["Candidate List", "Analytics", "Add Candidate"])
         
-    with col_txt:
-        st.write(f"**Division:** {cand_data['Division']}")
-        st.write(f"**Mentor:** {cand_data['Mentor']}")
-        st.write(f"**Specialty:** {cand_data['Specialty']}")
-        st.write(f"**Email:** {cand_data['Email']}")
-    
-    st.subheader("Achievements")
-    st.text_area("Add (Paper, Journal, Patent, Award, Projects, etc.)")
-    if st.button("Update Profile"):
-        st.success("Profile saved.")
-    
-    if st.session_state.page == "Profile" and st.session_state.user_role == "Admin":
-        if st.button("Return to Table"):
-            st.session_state.page = "Main"
+        if menu == "Candidate List":
+            st.title("Program Candidates")
+            cols_to_show = ['ID#', 'Name', 'Division', 'Mentor', 'Specialty', 'Phase in RDP 2024']
+            
+            # Display Header
+            h = st.columns([0.5, 1, 2, 1.5, 2, 2, 1])
+            labels = ["#", "ID#", "Name", "Division", "Mentor", "Specialty", "Phase"]
+            for i, label in enumerate(labels): h[i].markdown(f"**{label}**")
+
+            # Display Rows
+            for idx, row in df[cols_to_show].iterrows():
+                r = st.columns([0.5, 1, 2, 1.5, 2, 2, 1])
+                r[0].write(idx + 1)
+                if r[1].button(row['ID#'], key=f"btn_{row['ID#']}"):
+                    st.session_state.page = "Profile"
+                    st.session_state.selected_id = row['ID#']
+                r[2].write(row['Name'])
+                r[3].write(row['Division'])
+                r[4].write(row['Mentor'])
+                r[5].write(row['Specialty'])
+                r[6].write(row['Phase in RDP 2024'])
+
+        elif menu == "Analytics":
+            st.title("Analytics Dashboard")
+            c1, c2 = st.columns(2)
+            with c1:
+                st.plotly_chart(px.bar(df, x="Phase in RDP 2024", color="Phase in RDP 2024", title="Candidates by Phase"))
+            with c2:
+                st.plotly_chart(px.bar(df, x="Division", color="Division", title="Candidates by Division"))
+            
+            st.subheader("Interactive Explorer")
+            d_filter = st.multiselect("Select Division", df['Division'].unique())
+            p_filter = st.multiselect("Select Phase", df['Phase in RDP 2024'].unique())
+            filtered = df.copy()
+            if d_filter: filtered = filtered[filtered['Division'].isin(d_filter)]
+            if p_filter: filtered = filtered[filtered['Phase in RDP 2024'].isin(p_filter)]
+            st.dataframe(filtered)
+
+    # --- CANDIDATE VIEW ---
+    elif role == "Candidate":
+        st.title("My RDP Profile")
+        user_id = st.session_state.auth["user_id"]
+        data = df[df['ID#'] == user_id].iloc[0]
+        
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            st.image("https://via.placeholder.com/150", caption="Profile Photo")
+            st.write(f"**ID:** {user_id}")
+        with col2:
+            st.write(f"**Mentor:** {data['Mentor']}")
+            st.write(f"**Specialty:** {data['Specialty']}")
+            st.write(f"**Division:** {data['Division']}")
+        
+        st.subheader("Achievements")
+        st.text_area("Update Achievements (Papers, Patents, Projects...)", height=150)
+        if st.button("Save Achievements"):
+            st.success("Achievements updated successfully!")
+
+    # --- MENTOR VIEW ---
+    elif role == "Mentor":
+        st.title(f"Candidates Mentored by {st.session_state.auth['user_id']}")
+        mentee_df = df[df['Mentor'] == st.session_state.auth['user_id']]
+        st.dataframe(mentee_df[['ID#', 'Name', 'Division', 'Phase in RDP 2024', 'Specialty']])
+        st.text_area("Add Mentor Comments/Feedback")
+        st.button("Submit Feedback")
+
+    # --- DRILL DOWN PROFILE PAGE ---
+    if st.session_state.page == "Profile" and role == "Admin":
+        st.divider()
+        profile_id = st.session_state.selected_id
+        p_data = df[df['ID#'] == profile_id].iloc[0]
+        st.header(f"Profile Detail: {p_data['Name']}")
+        st.write(p_data)
+        if st.button("Close Profile"):
+            st.session_state.page = "Dashboard"
             st.rerun()
