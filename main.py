@@ -1,129 +1,117 @@
 import streamlit as st
 import pandas as pd
-import io
 import database as db
 
-st.set_page_config(page_title="EXPEC ARC RDP Portal", layout="wide")
+# --- CONFIGURATION ---
+st.set_page_config(page_title="RDP Portal", layout="wide")
 db.init_db()
 
-# --- UTILITY FUNCTIONS ---
-def clean_display(val):
-    if val is None or str(val).lower() in ["none", "nan", "null"]:
+# --- HELPERS ---
+def clean_val(val):
+    if pd.isna(val) or str(val).lower() in ["none", "nan", ""]:
         return ""
-    return str(val).strip()
+    return str(val).split('.')[0] if isinstance(val, float) else str(val)
 
-def get_latest_phase(r):
-    """Checks 2025, then 2024, 2023, 2022 to find the most recent phase."""
+def get_last_known_phase(row):
     for year in ['phase_2025', 'phase_2024', 'phase_2023', 'phase_2022']:
-        val = clean_display(r.get(year))
+        val = clean_val(row.get(year))
         if val != "":
-            return val
+            return f"Phase {val} ({year.split('_')[1]})"
     return "N/A"
 
-# Initialize session state for navigation if it doesn't exist
-if "selected_candidate_id" not in st.session_state:
-    st.session_state.selected_candidate_id = None
+# Session State for navigation
+if "active_id" not in st.session_state:
+    st.session_state.active_id = None
 
-# --- SIDEBAR FIXED MENU ---
+# --- SIDEBAR MENU ---
 with st.sidebar:
-    st.title("Navigation")
-    # This creates a fixed vertical menu
-    choice = st.radio(
-        "Select a Module:",
-        ["📊 Dashboard", "👤 Candidate Profile", "🎯 Scoring Matrix", "⚙️ Administration"]
+    st.title("RDP Navigation")
+    menu_choice = st.radio(
+        "Menu",
+        ["📊 Dashboard", "👤 Candidate Profile", "⚙️ Administration"]
     )
-    st.markdown("---")
-    st.caption(f"Database: {db.DB_PATH}")
-    
-# --- TAB: DASHBOARD ---
-if choice == "📊 Dashboard":
-    st.title("Candidate Search & Overview")
-    st.info("💡 Select a row to view the full candidate profile.")
-    
-    search = st.text_input("Search by Name or ID#", placeholder="Type to filter...")
-    raw_df = db.get_all_candidates(search)
-    
-    if not raw_df.empty:
-        # Prepare a display version of the dataframe
-        display_df = raw_df.copy()
-        display_df['Current/Last Phase'] = display_df.apply(get_latest_phase, axis=1)
-        
-        # We only show relevant columns in the main table
-        cols_to_show = ['candidate_id', 'name', 'division', 'specialty', 'mentor', 'Current/Last Phase']
-        
-        # Use st.dataframe with selection enabled
-        event = st.dataframe(
-            display_df[cols_to_show],
-            use_container_width=True,
-            hide_index=True,
-            on_select="rerun",
-            selection_mode="single"
-        )
+    st.divider()
+    if st.session_state.active_id:
+        st.success(f"Selected: {st.session_state.active_id}")
 
-        # LINKING LOGIC: If a user clicks a row, save the ID and tell them to go to Profile
-        if len(event.selection.rows) > 0:
-            selected_index = event.selection.rows[0]
-            st.session_state.selected_candidate_id = display_df.iloc[selected_index]['candidate_id']
-            st.success(f"Selected: {st.session_state.selected_candidate_id}. Click 'Candidate Profile' in the sidebar to view.")
+# --- MODULES ---
 
-# --- TAB: PROFILE ---
-elif choice == "👤 Candidate Profile":
-    st.title("Candidate Profile Details")
+if menu_choice == "📊 Dashboard":
+    st.subheader("Candidate Directory")
+    search = st.text_input("🔍 Search candidates...", "")
+    df = db.get_all_candidates(search)
+    
+    if not df.empty:
+        disp_df = df.copy()
+        disp_df['Last Known Phase'] = disp_df.apply(get_last_known_phase, axis=1)
+        cols = ['candidate_id', 'name', 'division', 'mentor', 'Last Known Phase']
+        
+        # VERSION-SAFE DATAFRAME
+        try:
+            # Try the modern interactive selection (Requires Streamlit 1.35+)
+            event = st.dataframe(
+                disp_df[cols],
+                use_container_width=True,
+                hide_index=True,
+                on_select="rerun",
+                selection_mode="single"
+            )
+            
+            if event.selection.rows:
+                idx = event.selection.rows[0]
+                st.session_state.active_id = disp_df.iloc[idx]['candidate_id']
+                st.toast(f"Selected {st.session_state.active_id}")
+
+        except Exception:
+            # Fallback for older Streamlit versions
+            st.dataframe(disp_df[cols], use_container_width=True, hide_index=True)
+            st.info("To view a profile, select the ID in the 'Candidate Profile' tab.")
+
+elif menu_choice == "👤 Candidate Profile":
+    st.subheader("Candidate Detail View")
     all_cands = db.get_all_candidates()
     
     if not all_cands.empty:
-        # Determine which ID to show (either from Dashboard click or Selectbox)
-        default_idx = 0
-        if st.session_state.selected_candidate_id:
-            try:
-                default_idx = all_cands.index[all_cands['candidate_id'] == st.session_state.selected_candidate_id].tolist()[0]
-            except: default_idx = 0
+        # Get index for selectbox
+        try:
+            default_idx = all_cands.index[all_cands['candidate_id'] == st.session_state.active_id].tolist()[0]
+        except:
+            default_idx = 0
             
-        choice_id = st.selectbox("Select Candidate ID", all_cands["candidate_id"], index=default_idx)
-        c = all_cands[all_cands["candidate_id"] == choice_id].iloc[0]
-
-        # PROFILE LAYOUT
-        col_photo, col_main = st.columns([1, 3])
+        selected_id = st.selectbox("Select Candidate ID:", all_cands['candidate_id'], index=default_idx)
+        c = all_cands[all_cands['candidate_id'] == selected_id].iloc[0]
         
-        with col_photo:
-            # Display Photo Placeholder
-            st.image("https://cdn-icons-png.flaticon.com/512/149/149071.png", width=200)
-            st.caption(f"ID: {c['candidate_id']}")
-            
-        with col_main:
-            st.header(clean_display(c['name']))
-            
-            p1, p2, p3 = st.columns(3)
-            p1.metric("Division", clean_display(c['division']))
-            p2.metric("Specialty", clean_display(c['specialty']))
-            
-            # PHASE LOGIC: Report last known phase
-            latest_phase = get_latest_phase(c)
-            p3.metric("Current/Last Phase", latest_phase)
+        # Profile UI
+        col_pic, col_info = st.columns([1, 3])
+        with col_pic:
+            # Placeholder Image
+            st.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=180)
+            st.metric("ID#", selected_id)
 
-            st.divider()
-            
-            st.subheader("Professional Details")
+        with col_info:
+            st.header(clean_val(c['name']))
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Division", clean_val(c['division']))
+            m2.metric("Specialty", clean_val(c['specialty']))
+            m3.metric("Current Status", get_last_known_phase(c))
+
+            st.markdown("---")
             d1, d2 = st.columns(2)
-            d1.write(f"**Mentor Name:** {clean_display(c['mentor'])}")
-            d2.write(f"**Degree:** {clean_display(c['degree'])}")
+            d1.write(f"👤 **Mentor:** {clean_val(c['mentor'])}")
+            d2.write(f"🎓 **Degree:** {clean_val(c['degree'])}")
             
-            st.write("---")
-            st.subheader("IK / OOK Comment")
-            # Displaying remarks as the IK/OOK comment field
-            remarks_val = clean_display(c['remarks'])
-            if remarks_val:
-                st.info(remarks_val)
+            st.markdown("---")
+            st.subheader("📝 IK / OOK Comment")
+            comment = clean_val(c['remarks'])
+            if comment:
+                st.info(comment)
             else:
-                st.write("*No comments available.*")
+                st.caption("No comments recorded.")
+    else:
+        st.error("No data available.")
 
-# --- OTHER TABS (Simplified placeholders) ---
-elif choice == "🎯 Scoring Matrix":
-    st.title("Scoring Matrix")
-    st.write("KPI Logic here...")
-
-elif choice == "⚙️ Administration":
-    st.title("Admin")
-    if st.button("Sync with Master Excel"):
+elif menu_choice == "⚙️ Administration":
+    st.subheader("System Administration")
+    if st.button("🔄 Reload from RDP Master.xlsx"):
         db.sync_excel_to_db()
-        st.success("Synced!")
+        st.success("Database updated successfully!")
