@@ -4,3 +4,4 @@ sqlalchemy
 plotly
 pillow
 streamlit-authenticator
+openpyxl
