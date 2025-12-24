@@ -25,7 +25,7 @@ st.markdown("""
         border-collapse: separate;
         border-spacing: 0;
         margin: 10px 0;
-        font-size: 15px; /* Adjust font size here */
+        font-size: 12px; /* Adjust font size here */
     }
 
     .modern-table th {
@@ -37,7 +37,7 @@ st.markdown("""
         border-bottom: 1px solid #E5E7EB;
         text-transform: uppercase;
         letter-spacing: 0.05em;
-        font-size: 13px;
+        font-size: 11px;
     }
 
     .modern-table td {
@@ -70,7 +70,7 @@ st.markdown("""
         color: #0369A1;
         padding: 4px 10px;
         border-radius: 9999px;
-        font-size: 12px;
+        font-size: 10px;
         font-weight: 500;
     }
     </style>
