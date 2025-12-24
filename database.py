@@ -100,3 +100,12 @@ def get_score_summary():
             GROUP BY candidate_id
         """
         return pd.read_sql(query, conn)
+
+def get_last_known_phase(row):
+    """Checks phases from 2025 back to 2022."""
+    for year in ['phase_2025', 'phase_2024', 'phase_2023', 'phase_2022']:
+        val = clean_val(row.get(year))
+        if val != "":
+            y_label = year.split('_')[1]
+            return f"Phase {val} ({y_label})"
+    return "Not Assigned"
