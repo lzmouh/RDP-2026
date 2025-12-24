@@ -101,7 +101,7 @@ if role == "Admin" and st.session_state.page == "Dashboard":
         st.title("Researcher Development Program - Master Table")
         
         # Squeezed column ratios: No, ID, Name, Div, Mentor, Spec, Phase
-        ratios = [0.4, 0.8, 1.5, 1, 1.5, 2, 0.7]
+        ratios = [0.4, 0.8, 1.5, 1, 1.5, 3, 0.7]
         h_cols = st.columns(ratios)
         headers = ["#", "ID#", "Name", "Division", "Mentor", "Speciality", "Phase"]
         for i, h in enumerate(headers): h_cols[i].markdown(f"**{h}**")
