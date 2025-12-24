@@ -60,7 +60,7 @@ if menu_choice == "📊 Dashboard":
         df['Last Known Phase'] = df.apply(get_last_known_phase, axis=1)
         
         # 1. Prepare Display Data
-        display_df = df[['candidate_id', 'name', 'specialty', 'division', 'mentor', 'Current Phase']].copy()
+        display_df = df[['candidate_id', 'name', 'specialty', 'division', 'mentor', 'Last Known Phase']].copy()
         display_df.insert(0, 'No.', range(1, len(display_df) + 1))
         
         # 2. Create the internal Link URL
