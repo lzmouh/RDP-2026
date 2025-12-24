@@ -101,6 +101,15 @@ def get_score_summary():
         """
         return pd.read_sql(query, conn)
 
+
+def clean_val(val):
+    """Helper to remove None/NaN and clean decimal phase numbers."""
+    if pd.isna(val) or str(val).lower() in ["none", "nan", ""]:
+        return ""
+    # Convert '2.0' to '2'
+    val_str = str(val).strip()
+    return val_str.split('.')[0] if '.' in val_str else val_str
+
 def get_last_known_phase(row):
     """Checks phases from 2025 back to 2022."""
     for year in ['phase_2025', 'phase_2024', 'phase_2023', 'phase_2022']:
