@@ -1,8 +1,9 @@
 import sqlite3
 import pandas as pd
+import os
 
 DB_PATH = "rdp.db"
-MASTER_FILE = "RDP Master.xlsx"
+CSV_FILE = "RDP Master.xlsx - 2025.csv"
 
 def get_connection():
     return sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -17,24 +18,44 @@ def init_db():
                 degree TEXT, remarks TEXT
             )
         """)
+    if not os.path.exists(DB_PATH) or os.stat(DB_PATH).st_size == 0:
+        sync_data()
+
+def sync_data():
+    df = pd.read_csv(CSV_FILE)
+    # Clean column names
+    df.columns = df.columns.str.strip()
+    with get_connection() as conn:
+        for _, r in df.iterrows():
+            conn.execute("""
+                INSERT OR REPLACE INTO candidates 
+                (candidate_id, name, division, specialty, mentor, 
+                 phase_2022, phase_2023, phase_2024, phase_2025, degree, remarks)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                str(r.get("ID#")), str(r.get("Name ")), str(r.get("Division")), 
+                str(r.get("Specialty")), str(r.get("Mentor")),
+                str(r.get("Phase in RDP 2022")), str(r.get("Phase in RDP 2023")),
+                str(r.get("Phase in RDP 2024")), str(r.get("Phase in RDP 2025")),
+                str(r.get("MS/PhD")), str(r.get("IK/OOK COMMENT"))
+            ))
+        conn.commit()
 
 def clean_val(val):
-    if pd.isna(val) or str(val).lower() in ["none", "nan", ""]:
-        return ""
-    val_str = str(val).strip()
-    return val_str.split('.')[0] if '.' in val_str else val_str
+    if pd.isna(val) or str(val).lower() in ["none", "nan", ""]: return ""
+    return str(val).split('.')[0] if '.' in str(val) else str(val)
 
 def get_last_known_phase(row):
     for year in ['phase_2025', 'phase_2024', 'phase_2023', 'phase_2022']:
         val = clean_val(row.get(year))
         if val != "":
-            y_label = year.split('_')[1]
-            return f"Phase {val} ({y_label})"
+            y = year.split('_')[1]
+            return f"Phase {val} ({y})"
     return "Not Assigned"
 
-def get_all_candidates(search_query=None):
+def get_all_candidates(search=None):
     with get_connection() as conn:
         sql = "SELECT * FROM candidates"
-        if search_query:
-            sql += f" WHERE name LIKE '%{search_query}%' OR candidate_id LIKE '%{search_query}%' OR mentor LIKE '%{search_query}%'"
+        if search:
+            sql += f" WHERE name LIKE '%{search}%' OR candidate_id LIKE '%{search}%'"
         return pd.read_sql(sql, conn)
