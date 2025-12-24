@@ -4,219 +4,163 @@ import plotly.express as px
 import os
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="RDP Researcher Development Program", layout="wide")
+st.set_page_config(page_title="RDP Portal - Secure Access", layout="wide")
 
-# --- FILE CONFIG ---
-# This is the expected filename. Ensure your file is named exactly this or use the uploader.
-DB_FILE = 'RDP Master.xlsx - 2025.csv'
+# --- AUTHENTICATION CONFIG ---
+ADMIN_PASSWORD = "admin123"  # Change this for security
 
 # --- DATA LOADING ---
+DB_FILE = 'RDP Master.xlsx - 2025.csv'
+
 def load_data():
     if os.path.exists(DB_FILE):
-        try:
-            df = pd.read_csv(DB_FILE)
-            # Clean column names (remove leading/trailing spaces)
-            df.columns = df.columns.str.strip()
-            # Ensure ID# is a string for search
-            if 'ID#' in df.columns:
-                df['ID#'] = df['ID#'].astype(str)
-            return df
-        except Exception as e:
-            st.error(f"Error reading file: {e}")
-            return None
+        df = pd.read_csv(DB_FILE)
+        df.columns = df.columns.str.strip()
+        if 'ID#' in df.columns:
+            df['ID#'] = df['ID#'].astype(str)
+        return df
     return None
 
 # Initialize Session State
 if 'df' not in st.session_state:
     st.session_state.df = load_data()
-
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
+if 'user_role' not in st.session_state:
+    st.session_state.user_role = None
+if 'user_id' not in st.session_state:
+    st.session_state.user_id = None
 if 'page' not in st.session_state:
     st.session_state.page = "Main Page"
 
-if 'selected_candidate' not in st.session_state:
-    st.session_state.selected_candidate = None
+# --- LOGIN SCREEN ---
+def login_screen():
+    st.title("🔐 RDP Development Program Login")
+    
+    tab1, tab2, tab3 = st.tabs(["Admin Login", "Candidate Login", "Mentor Login"])
+    
+    with tab1:
+        with st.form("admin_login"):
+            pw = st.text_input("Admin Password", type="password")
+            if st.form_submit_button("Login as Admin"):
+                if pw == ADMIN_PASSWORD:
+                    st.session_state.authenticated = True
+                    st.session_state.user_role = "Admin"
+                    st.rerun()
+                else:
+                    st.error("Invalid Admin Password")
 
-# Logic for data persistence (Session-based for demo)
-if 'achievements' not in st.session_state:
-    st.session_state.achievements = {} # ID -> list of dicts
+    with tab2:
+        with st.form("candidate_login"):
+            c_id = st.text_input("Candidate ID#")
+            c_pw = st.text_input("Password (Use your ID#)", type="password")
+            if st.form_submit_button("Login"):
+                if c_id in st.session_state.df['ID#'].values and c_id == c_pw:
+                    st.session_state.authenticated = True
+                    st.session_state.user_role = "Candidate"
+                    st.session_state.user_id = c_id
+                    st.rerun()
+                else:
+                    st.error("Invalid ID or Password")
+
+    with tab3:
+        with st.form("mentor_login"):
+            m_name = st.text_input("Mentor Name (Exact as in DB)")
+            m_pw = st.text_input("Password", type="password")
+            if st.form_submit_button("Login"):
+                # Check if mentor exists in DB
+                if m_name in st.session_state.df['Mentor'].values and m_pw == "mentor123":
+                    st.session_state.authenticated = True
+                    st.session_state.user_role = "Mentor"
+                    st.session_state.user_id = m_name
+                    st.rerun()
+                else:
+                    st.error("Invalid Mentor Credentials")
+
+if not st.session_state.authenticated:
+    login_screen()
+    st.stop()
+
+# --- LOGOUT BUTTON ---
+if st.sidebar.button("Log Out"):
+    st.session_state.authenticated = False
+    st.session_state.user_role = None
+    st.rerun()
+
+# --- APP LOGIC (Only runs if authenticated) ---
+
+role = st.session_state.user_role
+st.sidebar.info(f"Logged in as: {role}")
 
 # --- NAVIGATION ---
 def navigate_to(page, candidate_id=None):
     st.session_state.page = page
     st.session_state.selected_candidate = str(candidate_id) if candidate_id else None
-    st.rerun()
 
-# --- HEADER & FILE UPLOAD ---
-if st.session_state.df is None:
-    st.title("🚀 RDP System Setup")
-    st.warning(f"File '{DB_FILE}' not found in the directory.")
-    uploaded_file = st.file_uploader("Please upload the RDP Master CSV file to start", type=["csv"])
-    if uploaded_file:
-        df = pd.read_csv(uploaded_file)
-        df.columns = df.columns.str.strip()
-        if 'ID#' in df.columns:
-            df['ID#'] = df['ID#'].astype(str)
-        st.session_state.df = df
-        st.success("File uploaded successfully!")
-        st.rerun()
-    st.stop()
-
-# --- SIDEBAR NAVIGATION ---
-st.sidebar.title("RDP Navigation")
-role = st.sidebar.radio("Role", ["Admin", "Candidate"])
-
+# --- ADMIN VIEW ---
 if role == "Admin":
-    if st.sidebar.button("📋 Candidate List (Main)"): navigate_to("Main Page")
-    if st.sidebar.button("➕ Add Candidate"): navigate_to("Add Candidate")
-    if st.sidebar.button("📊 Analytics"): navigate_to("Analytics")
-else:
-    # Candidate "Login"
-    all_ids = sorted(st.session_state.df['ID#'].unique().tolist())
-    my_id = st.sidebar.selectbox("Select Your ID", all_ids)
-    if st.sidebar.button("👤 View My Profile"):
-        navigate_to("Candidate Profile", my_id)
+    menu = st.sidebar.selectbox("Menu", ["Dashboard", "Add Candidate", "Analytics"])
+    
+    if menu == "Dashboard":
+        st.title("Admin Control Panel")
+        # Display the master table with clickable IDs
+        display_df = st.session_state.df[['ID#', 'Name', 'Division', 'Mentor', 'Phase in RDP 2024']]
+        st.write("### All Candidates")
+        for _, row in display_df.iterrows():
+            col1, col2, col3 = st.columns([1, 3, 2])
+            if col1.button(row['ID#'], key=row['ID#']):
+                navigate_to("Profile", row['ID#'])
+            col2.write(row['Name'])
+            col3.write(row['Division'])
 
-# --- PAGES ---
+    elif menu == "Analytics":
+        st.title("Program Analytics")
+        fig = px.bar(st.session_state.df, x="Division", color="Phase in RDP 2024", title="Candidates by Division & Phase")
+        st.plotly_chart(fig)
 
-# 1. MAIN PAGE (ADMIN TABLE)
-if st.session_state.page == "Main Page":
-    st.title("Researcher Development Program - Admin Dashboard")
+# --- CANDIDATE VIEW ---
+elif role == "Candidate":
+    st.title("Candidate Portal")
+    user_id = st.session_state.user_id
+    cand_data = st.session_state.df[st.session_state.df['ID#'] == user_id].iloc[0]
     
-    # Define phase column (Mapping 'current phase' to 2024 data as it is most complete)
-    phase_col = 'Phase in RDP 2024'
+    st.subheader(f"Welcome, {cand_data['Name']}")
     
-    # Prepare display data
-    display_df = st.session_state.df[['ID#', 'Name', 'Division', 'Mentor', 'Specialty', phase_col]].copy()
-    display_df.insert(0, 'No.', range(1, len(display_df) + 1))
-    
-    # Custom Table UI
-    cols = st.columns([0.5, 1, 2, 1.5, 2, 2, 1])
-    headers = ["#", "ID#", "Candidate Name", "Division", "Mentor", "Specialty", "Phase"]
-    for i, h in enumerate(headers):
-        cols[i].markdown(f"**{h}**")
-    
-    for _, row in display_df.iterrows():
-        c1, c2, c3, c4, c5, c6, c7 = st.columns([0.5, 1, 2, 1.5, 2, 2, 1])
-        c1.text(row['No.'])
-        # Clickable ID
-        if c2.button(row['ID#'], key=f"id_{row['ID#']}"):
-            navigate_to("Candidate Profile", row['ID#'])
-        c3.text(row['Name'])
-        c4.text(row['Division'])
-        c5.text(row['Mentor'])
-        c6.text(row['Specialty'])
-        c7.text(row[phase_col])
+    with st.expander("Update My Profile"):
+        new_email = st.text_input("Update Email", value=cand_data['Email'])
+        if st.button("Save Changes"):
+            st.success("Profile Updated!")
 
-# 2. PROFILE PAGE
-elif st.session_state.page == "Candidate Profile":
+    st.subheader("Add Achievements")
+    ach_type = st.selectbox("Type", ["Paper", "Patent", "Award", "Project"])
+    details = st.text_area("Achievement Details")
+    if st.button("Submit Achievement"):
+        st.success("Achievement added to your profile for Review.")
+
+# --- MENTOR VIEW ---
+elif role == "Mentor":
+    st.title(f"Mentor Portal: {st.session_state.user_id}")
+    # Filter only candidates belonging to this mentor
+    my_candidates = st.session_state.df[st.session_state.df['Mentor'] == st.session_state.user_id]
+    
+    st.write("### Your Assigned Candidates")
+    if my_candidates.empty:
+        st.write("No candidates assigned.")
+    else:
+        st.table(my_candidates[['ID#', 'Name', 'Phase in RDP 2024']])
+        selected_c = st.selectbox("Select Candidate to Review", my_candidates['Name'])
+        st.text_area(f"Add Mentor Comments for {selected_c}")
+        if st.button("Save Review"):
+            st.success("Review Saved.")
+
+# --- PROFILE DETAIL VIEW (Shared) ---
+if st.session_state.page == "Profile" and st.session_state.selected_candidate:
+    st.divider()
     cid = st.session_state.selected_candidate
-    row = st.session_state.df[st.session_state.df['ID#'] == cid].iloc[0]
-    
-    st.title(f"Profile: {row['Name']}")
-    
-    col_img, col_info = st.columns([1, 3])
-    with col_img:
-        st.image("https://via.placeholder.com/200", caption=f"ID: {cid}")
-        if st.button("Update Profile Photo"):
-            st.info("Photo upload feature triggered.")
-            
-    with col_info:
-        st.subheader("Professional Details")
-        st.write(f"**Division:** {row['Division']}")
-        st.write(f"**Mentor:** {row['Mentor']}")
-        st.write(f"**Specialty:** {row['Specialty']}")
-        st.write(f"**Current Phase (2024):** {row['Phase in RDP 2024']}")
-        st.write(f"**Email:** {row['Email']}")
-        st.write(f"**Nationality:** {row['Nationality']}")
-
-    st.divider()
-    
-    # Achievements Section
-    st.subheader("🏆 Achievements")
-    if cid not in st.session_state.achievements:
-        st.session_state.achievements[cid] = []
-    
-    if st.session_state.achievements[cid]:
-        for ach in st.session_state.achievements[cid]:
-            st.info(f"**{ach['type']}**: {ach['details']}")
-    else:
-        st.write("No achievements listed yet.")
-
-    # Add Achievements (Visible to Candidate or Admin)
-    with st.expander("Add New Achievement"):
-        with st.form("ach_form"):
-            a_type = st.selectbox("Type", ["Paper", "Journal", "Disclosed Patent", "Filed Patent", "Granted Patent", "Award", "Project", "Technology Deployment", "Commercialization"])
-            a_details = st.text_area("Details (Title, Year, etc.)")
-            if st.form_submit_button("Save Achievement"):
-                st.session_state.achievements[cid].append({"type": a_type, "details": a_details})
-                st.success("Achievement saved!")
-                st.rerun()
-
-    st.divider()
-    st.subheader("💬 Comments")
-    st.text_area("Admin/Mentor Comments", height=100)
-    
-    if st.button("Update Profile Data"):
-        st.warning("Editing fields is enabled in the full database version.")
-
-# 3. ANALYTICS PAGE
-elif st.session_state.page == "Analytics":
-    st.title("📊 Researcher Development Analytics")
-    df = st.session_state.df
-    
-    # 1. Row of Bar Charts
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("Candidates vs Phases")
-        fig1 = px.bar(df['Phase in RDP 2024'].value_counts().reset_index(), 
-                     x='Phase in RDP 2024', y='count', color='Phase in RDP 2024',
-                     labels={'count': 'Number of Candidates'})
-        st.plotly_chart(fig1, use_container_width=True)
-        
-    with col2:
-        st.subheader("Candidates vs Division")
-        fig2 = px.bar(df['Division'].value_counts().reset_index(), 
-                     x='Division', y='count', color='Division')
-        st.plotly_chart(fig2, use_container_width=True)
-        
-    st.divider()
-    
-    # 2. Interactive Selector Chart
-    st.subheader("Interactive Explorer")
-    sel_div = st.multiselect("Select Divisions", options=sorted(df['Division'].unique()), default=sorted(df['Division'].unique())[:3])
-    sel_phase = st.multiselect("Select Phases", options=sorted(df['Phase in RDP 2024'].unique()), default=sorted(df['Phase in RDP 2024'].unique()))
-    
-    filtered_df = df[df['Division'].isin(sel_div) & df['Phase in RDP 2024'].isin(sel_phase)]
-    
-    if not filtered_df.empty:
-        fig3 = px.scatter(filtered_df, x="Division", y="Name", color="Phase in RDP 2024", 
-                         title="Filtered Candidate Mapping", height=600)
-        st.plotly_chart(fig3, use_container_width=True)
-    else:
-        st.write("No candidates match the selection.")
-
-# 4. ADD CANDIDATE PAGE
-elif st.session_state.page == "Add Candidate":
-    st.title("➕ Register New Candidate")
-    with st.form("new_cand"):
-        c1, c2 = st.columns(2)
-        with c1:
-            n_name = st.text_input("Full Name")
-            n_id = st.text_input("ID#")
-            n_div = st.selectbox("Division", sorted(st.session_state.df['Division'].unique()))
-        with c2:
-            n_mentor = st.text_input("Mentor Name")
-            n_spec = st.text_input("Speciality")
-            n_phase = st.slider("Current Phase", 1, 4, 1)
-        
-        n_photo = st.file_uploader("Upload Profile Photo", type=["jpg", "png"])
-        
-        if st.form_submit_button("Add to Database"):
-            # logic to append to session df
-            new_data = {
-                'Name': n_name, 'ID#': n_id, 'Division': n_div, 
-                'Mentor': n_mentor, 'Specialty': n_spec, 'Phase in RDP 2024': n_phase,
-                'Email': '', 'Nationality': ''
-            }
-            st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame([new_data])], ignore_index=True)
-            st.success(f"Candidate {n_name} added successfully!")
+    data = st.session_state.df[st.session_state.df['ID#'] == cid].iloc[0]
+    st.header(f"Profile: {data['Name']}")
+    st.write(f"**Specialty:** {data['Specialty']}")
+    st.write(f"**Current Phase:** {data['Phase in RDP 2024']}")
+    if st.button("Back to Dashboard"):
+        st.session_state.page = "Main Page"
+        st.rerun()
