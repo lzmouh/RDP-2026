@@ -7,7 +7,7 @@ import os
 st.set_page_config(page_title="RDP Management System", layout="wide")
 
 # --- DATA LOADING & SESSION STATE ---
-DB_FILE = 'RDP Master.xlsx - 2025.csv'
+DB_FILE = 'RDP Master.xlsx'
 
 def load_data():
     if os.path.exists(DB_FILE):
