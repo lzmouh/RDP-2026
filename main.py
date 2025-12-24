@@ -7,7 +7,7 @@ import os
 st.set_page_config(page_title="RDP Researcher Portal", layout="wide")
 
 # --- 2. DATA LOADING (Handles Column Name Errors) ---
-DB_FILE = 'RDP Master.xlsx - 2025.csv'
+DB_FILE = 'RDP Master.xlsx'
 
 def load_data():
     if os.path.exists(DB_FILE):
